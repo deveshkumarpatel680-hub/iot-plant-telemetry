@@ -5,7 +5,7 @@ A full-stack Python (Flask) REST API and web dashboard for ingesting plant senso
 ## Application Screenshots
 
 **1. Telemetry Dashboard & Registered Plants**
-![Telemetry Dashboard](screenshots\01-dashboard.png)
+![Telemetry Dashboard](screenshots/01-dashboard.png)
 
 **2. Automated Watering Alert Triggered**
 ![Watering Alert Triggered](screenshots/02-alert-triggered.png)
