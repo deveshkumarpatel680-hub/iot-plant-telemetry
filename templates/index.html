@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT Plant Care & Telemetry Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; background: #f5f7fa; color: #1f2937; }
+    h1, h2 { margin-bottom: 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .card { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    label { display: block; font-size: 13px; margin-top: 8px; font-weight: bold; }
+    input, select, button { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; border-radius: 4px; border: 1px solid #cbd5e1; }
+    button { background: #0f766e; color: #fff; border: none; font-weight: bold; cursor: pointer; margin-top: 12px; }
+    button:hover { background: #115e59; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 8px; text-align: left; }
+    .badge-alert { background: #dc2626; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    .badge-ok { background: #16a34a; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    #statusMsg { margin-bottom: 12px; font-weight: bold; color: #0f766e; }
+  </style>
+</head>
+<body>
+  <h1>IoT Plant Care &amp; Telemetry System</h1>
+  <div id="statusMsg"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1. Register Plant</h2>
+      <form id="plantForm">
+        <label>Plant Name</label>
+        <input type="text" id="plantName" placeholder="e.g., Balcony Basil" required />
+        <label>Species</label>
+        <input type="text" id="plantSpecies" placeholder="e.g., Ocimum basilicum" required />
+        <label>Moisture Alert Threshold (%)</label>
+        <input type="number" id="plantThreshold" value="35" min="0" max="100" step="0.5" required />
+        <button type="submit">Add Plant</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>2. Ingest Sensor Reading</h2>
+      <form id="readingForm">
+        <label>Select Plant</label>
+        <select id="readingPlantId" required></select>
+        <label>Soil Moisture (%)</label>
+        <input type="number" id="soilMoisture" value="28" min="0" max="100" step="0.1" required />
+        <label>Ambient Humidity (%)</label>
+        <input type="number" id="ambientHumidity" value="55" min="0" max="100" step="0.1" required />
+        <label>Temperature (°C)</label>
+        <input type="number" id="temperatureC" value="26.5" min="-20" max="70" step="0.1" required />
+        <button type="submit">Send Telemetry</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Monitored Plants &amp; Alerts</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Species</th><th>Threshold</th><th>Readings</th><th>Avg Moisture</th><th>Pending Alerts</th><th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="plantsTable"></tbody>
+    </table>
+  </div>
+
+  <div class="card" id="detailCard" style="margin-top: 16px; display: none;">
+    <h2 id="detailTitle">Plant Reminders</h2>
+    <div id="reminderList"></div>
+  </div>
+
+  <script>
+    const statusMsg = document.getElementById("statusMsg");
+
+    async function loadPlants() {
+      const res = await fetch("/api/plants");
+      const data = await res.json();
+      const tbody = document.getElementById("plantsTable");
+      const select = document.getElementById("readingPlantId");
+      tbody.innerHTML = "";
+      select.innerHTML = "";
+
+      data.plants.forEach(p => {
+        const alertBadge = p.pending_alerts > 0
+          ? `<span class="badge-alert">${p.pending_alerts} Alert(s)</span>`
+          : `<span class="badge-ok">Healthy</span>`;
+        tbody.innerHTML += `
+          <tr>
+            <td>${p.id}</td>
+            <td>${p.name}</td>
+            <td>${p.species}</td>
+            <td>${p.moisture_threshold}%</td>
+            <td>${p.total_readings}</td>
+            <td>${p.avg_moisture !== null ? p.avg_moisture + "%" : "—"}</td>
+            <td>${alertBadge}</td>
+            <td><button style="margin:0;padding:4px 8px;" onclick="viewPlant(${p.id})">Inspect</button></td>
+          </tr>`;
+        select.innerHTML += `<option value="${p.id}">#${p.id} - ${p.name}</option>`;
+      });
+    }
+
+    async function viewPlant(id) {
+      const res = await fetch(`/api/plants/${id}/summary`);
+      const data = await res.json();
+      document.getElementById("detailCard").style.display = "block";
+      document.getElementById("detailTitle").innerText = `Care Reminders — ${data.plant.name}`;
+      const list = document.getElementById("reminderList");
+      if (!data.reminders.length) {
+        list.innerHTML = "<p>No alerts recorded yet.</p>";
+        return;
+      }
+      list.innerHTML = data.reminders.map(r => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eee;">
+          <span><strong>[${r.status}]</strong> ${r.message}</span>
+          ${r.status === "PENDING" ? `<button style="width:auto;margin:0;padding:4px 10px;" onclick="markDone(${r.id}, ${id})">Mark Watered</button>` : ""}
+        </div>`).join("");
+    }
+
+    async function markDone(reminderId, plantId) {
+      await fetch(`/api/reminders/${reminderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "COMPLETED" })
+      });
+      statusMsg.innerText = `Reminder #${reminderId} marked COMPLETED.`;
+      await loadPlants();
+      await viewPlant(plantId);
+    }
+
+    document.getElementById("plantForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById("plantName").value,
+        species: document.getElementById("plantSpecies").value,
+        moisture_threshold: parseFloat(document.getElementById("plantThreshold").value)
+      };
+      const res = await fetch("/api/plants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      statusMsg.innerText = res.ok ? `Registered plant #${data.id}: ${data.name}` : `Error: ${data.error}`;
+      e.target.reset();
+      loadPlants();
+    });
+
+    document.getElementById("readingForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payload = {
+        plant_id: parseInt(document.getElementById("readingPlantId").value, 10),
+        soil_moisture: parseFloat(document.getElementById("soilMoisture").value),
+        ambient_humidity: parseFloat(document.getElementById("ambientHumidity").value),
+        temperature_c: parseFloat(document.getElementById("temperatureC").value)
+      };
+      const res = await fetch("/api/readings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      statusMsg.innerText = res.ok
+        ? `Saved reading #${data.reading_id}. Watering alert triggered: ${data.alert_triggered}`
+        : `Error: ${data.error}`;
+      loadPlants();
+    });
+
+    loadPlants();
+  </script>
+</body>
+</html>
